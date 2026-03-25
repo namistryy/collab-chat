@@ -1,6 +1,6 @@
-# Collab Chat — Browser Extension
+# Tandem — Browser Extension
 
-A floating collaborative chat window with AI-powered task extraction.
+Tandem is a live, remote design meeting where collaborators can work on their project while having a chat open on the same window. With AI assistance, chat logs are monitored for any tasks discussed and automatically extracted. 
 Works universally on any website. No switching to Slack or Discord.
 
 ---
