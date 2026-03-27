@@ -1,58 +1,36 @@
-// popup.js — Toolbar popup logic for Collab Chat
-
-function getState() {
-  return new Promise(res => chrome.runtime.sendMessage({ type: 'GET_STATE' }, res));
+function m(type, data) {
+  var d = data || {}; d.type = type;
+  return new Promise(function(res) { chrome.runtime.sendMessage(d, function(r) { res(r || {}); }); });
 }
+function x(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  const data     = await getState();
-  const settings = data.settings  || {};
-  const messages = data.messages  || [];
-  const todos    = data.todos     || [];
+document.addEventListener("DOMContentLoaded", function() {
+  var pb = document.getElementById("pb");
+  Promise.all([m("GET_AUTH"), m("GET_STATE")]).then(function(res) {
+    var user  = res[0].user || null;
+    var state = res[1];
+    if (!user) { pb.innerHTML = '<div class="na">Sign in via the Tandem widget on any page.</div>'; return; }
+    var name = user.name || user.email || "?";
+    pb.innerHTML =
+      '<div class="sec"><div class="lbl">Signed in as</div><div class="urow"><div class="av">'+name[0].toUpperCase()+'</div><div><div style="font-weight:500">'+x(user.name||"")+'</div><div style="font-size:10px;color:#aaa">'+x(user.email)+'</div></div></div></div>'+
+      '<div class="sec"><div class="lbl">Session</div><div class="srow">'+(state.roomId?'<div class="sdot"></div>In room <span class="pill">'+x(state.roomId)+'</span>':'<span style="color:#aaa">Not in a session</span>')+'</div></div>'+
+      '<div class="sec"><div class="lbl">Stats</div><div class="stats"><div class="stat"><div class="stat-l">Messages</div><div class="stat-v">'+(state.msgs||[]).length+'</div></div><div class="stat"><div class="stat-l">Tasks</div><div class="stat-v">'+(state.todos||[]).length+'</div></div></div></div>'+
+      '<div class="acts"><button class="btn" id="tb">&#128065; Show / hide widget</button><button class="btn d" id="so">&#8617; Sign out</button></div>';
 
-  // Populate fields
-  document.getElementById('name-input').value = settings.username || '';
-  document.getElementById('s-msgs').textContent  = messages.length;
-  document.getElementById('s-tasks').textContent = todos.length;
-
-  // Save name
-  document.getElementById('save-btn').addEventListener('click', async () => {
-    const name = document.getElementById('name-input').value.trim();
-    if (!name) return;
-    const current = (await getState()).settings || {};
-    chrome.runtime.sendMessage({
-      type: 'SAVE_SETTINGS',
-      payload: { ...current, username: name, widgetHidden: false },
-    });
-    const msg = document.getElementById('saved-msg');
-    msg.style.display = 'block';
-    setTimeout(() => { msg.style.display = 'none'; }, 2000);
-  });
-
-  // Toggle widget on active tab
-  document.getElementById('toggle-btn').addEventListener('click', async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const root = document.getElementById('collab-chat-root');
-          if (root) {
-            const hidden = root.style.display === 'none';
-            root.style.display = hidden ? '' : 'none';
-          }
-        },
+    document.getElementById("tb").addEventListener("click", function() {
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        if (tabs && tabs[0]) {
+          chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: function() {
+            var r = document.getElementById("tandem-root");
+            if (r) r.style.display = r.style.display === "none" ? "" : "none";
+          }});
+        }
+        window.close();
       });
-    }
-    window.close();
-  });
-
-  // Clear all data
-  document.getElementById('clear-btn').addEventListener('click', () => {
-    if (!confirm('Clear all messages and tasks? This cannot be undone.')) return;
-    chrome.runtime.sendMessage({ type: 'CLEAR_ALL' }, () => {
-      document.getElementById('s-msgs').textContent  = '0';
-      document.getElementById('s-tasks').textContent = '0';
+    });
+    document.getElementById("so").addEventListener("click", function() {
+      if (!confirm("Sign out of Tandem?")) return;
+      m("SIGN_OUT").then(function() { window.close(); });
     });
   });
 });
