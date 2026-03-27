@@ -1,90 +1,66 @@
-// background.js — Service worker for Collab Chat extension
-// Manages persistent state, message storage, and routes messages between scripts
+// background.js — Tandem service worker
+const FB_API_KEY = "AIzaSyAEjXVnVLYwQPAHyMWiN8gF1L4cs9GxDVE";
 
-const DEFAULT_SETTINGS = {
-  username: '',
-  widgetPosition: { bottom: 24, right: 24 },
-  widgetMinimized: false,
-  widgetHidden: false,
-};
+let currentUser = null;
 
-// ── Install: set defaults ─────────────────────────────────────────────────────
-chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.local.get('settings');
-  if (!existing.settings) {
-    await chrome.storage.local.set({
-      settings: DEFAULT_SETTINGS,
-      messages: [],
-      todos: [],
-    });
-    console.log('[CollabChat] Installed — defaults set.');
+async function restoreSession() {
+  const data = await chrome.storage.local.get(['user']);
+  if (data.user) currentUser = data.user;
+}
+
+chrome.runtime.onInstalled.addListener(restoreSession);
+chrome.runtime.onStartup.addListener(restoreSession);
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'GET_AUTH') {
+    sendResponse({ user: currentUser });
+  } else if (msg.type === 'SIGN_IN') {
+    handleSignIn(msg, sendResponse);
+    return true; 
+  } else if (msg.type === 'SIGN_UP') {
+    handleSignUp(msg, sendResponse);
+    return true;
+  } else if (msg.type === 'SIGN_OUT') {
+    currentUser = null;
+    chrome.storage.local.clear(() => sendResponse({ ok: true }));
+    return true;
   }
 });
 
-// ── Message handler ───────────────────────────────────────────────────────────
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-
-  if (message.type === 'GET_STATE') {
-    chrome.storage.local.get(['settings', 'messages', 'todos'], (data) => {
-      sendResponse({
-        settings: data.settings || DEFAULT_SETTINGS,
-        messages: data.messages || [],
-        todos:    data.todos    || [],
-      });
+async function handleSignIn(msg, sendResponse) {
+  try {
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FB_API_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: msg.email, password: msg.password, returnSecureToken: true })
     });
-    return true;
+    const data = await res.json();
+    if (data.error) return sendResponse({ ok: false, error: data.error.message });
+    
+    currentUser = { uid: data.localId, email: msg.email, idToken: data.idToken };
+    await chrome.storage.local.set({ user: currentUser });
+    sendResponse({ ok: true, user: currentUser });
+  } catch (e) {
+    sendResponse({ ok: false, error: e.message });
   }
+}
 
-  if (message.type === 'SAVE_MESSAGE') {
-    chrome.storage.local.get('messages', (data) => {
-      const messages = data.messages || [];
-      messages.push(message.payload);
-      // Cap at 500 messages to avoid unbounded growth
-      chrome.storage.local.set({ messages: messages.slice(-500) });
+async function handleSignUp(msg, sendResponse) {
+  try {
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FB_API_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: msg.email, password: msg.pass, returnSecureToken: true })
     });
-    return true;
+    const data = await res.json();
+    if (data.error) return sendResponse({ ok: false, error: data.error.message });
+    
+    currentUser = { uid: data.localId, email: msg.email, name: msg.name, idToken: data.idToken };
+    await chrome.storage.local.set({ user: currentUser });
+    sendResponse({ ok: true, user: currentUser });
+  } catch (e) {
+    sendResponse({ ok: false, error: e.message });
   }
-
-  if (message.type === 'SAVE_TODO') {
-    chrome.storage.local.get('todos', (data) => {
-      const todos = data.todos || [];
-      todos.unshift(message.payload);
-      chrome.storage.local.set({ todos });
-    });
-    return true;
-  }
-
-  if (message.type === 'TOGGLE_TODO') {
-    chrome.storage.local.get('todos', (data) => {
-      const todos = data.todos || [];
-      const item = todos.find(t => t.id === message.payload.id);
-      if (item) item.done = !item.done;
-      chrome.storage.local.set({ todos });
-      sendResponse({ todos });
-    });
-    return true;
-  }
-
-  if (message.type === 'DELETE_TODO') {
-    chrome.storage.local.get('todos', (data) => {
-      const todos = (data.todos || []).filter(t => t.id !== message.payload.id);
-      chrome.storage.local.set({ todos });
-      sendResponse({ todos });
-    });
-    return true;
-  }
-
-  if (message.type === 'SAVE_SETTINGS') {
-    chrome.storage.local.set({ settings: message.payload });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (message.type === 'CLEAR_ALL') {
-    chrome.storage.local.set({ messages: [], todos: [] }, () => {
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
-});
+}
